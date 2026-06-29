@@ -91,7 +91,7 @@ def save_state(state: dict):
 # ============================================================
 
 def create_session() -> requests.Session:
-    """创建带浏览器伪装头的 Session，并预取 Cookie"""
+    """创建带浏览器伪装头的 Session，并预取 Cookie（带重试）"""
     session = requests.Session()
     session.headers.update({
         "User-Agent": (
@@ -99,47 +99,96 @@ def create_session() -> requests.Session:
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/131.0.0.0 Safari/537.36"
         ),
-        "Accept": "application/json, text/plain, */*",
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;"
+            "q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ),
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Referer": "https://www.bilibili.com/",
-        "Origin": "https://www.bilibili.com",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
     })
-    # 先访问主站获取 buvid3 等必要 Cookie（防 412 风控）
-    try:
-        session.get("https://www.bilibili.com/", timeout=15)
-    except requests.RequestException:
-        pass
+    # 先访问 UP 主空间页获取 Cookie（比主站更不容易触发风控）
+    for attempt in range(3):
+        try:
+            resp = session.get(
+                f"https://space.bilibili.com/{BILI_UID}/dynamic",
+                timeout=15,
+                allow_redirects=True,
+            )
+            if resp.status_code == 200:
+                break
+        except requests.RequestException:
+            if attempt < 2:
+                time.sleep(2 ** attempt)
     return session
 
 
 def get_wbi_keys(session: requests.Session) -> tuple:
-    """从 nav 接口获取 WBI 签名所需的 img_key 和 sub_key"""
-    resp = session.get(
-        "https://api.bilibili.com/x/web-interface/nav", timeout=10
-    )
-    data = resp.json()
-    wbi_img = data["data"]["wbi_img"]
-    img_key = wbi_img["img_url"].rsplit("/", 1)[-1].split(".")[0]
-    sub_key = wbi_img["sub_url"].rsplit("/", 1)[-1].split(".")[0]
-    return img_key, sub_key
+    """从 nav 接口获取 WBI 签名所需的 img_key 和 sub_key（带重试）"""
+    for attempt in range(3):
+        try:
+            resp = session.get(
+                "https://api.bilibili.com/x/web-interface/nav",
+                timeout=10,
+                headers={
+                    "Accept": "application/json, text/plain, */*",
+                    "Referer": "https://www.bilibili.com/",
+                    "Origin": "https://www.bilibili.com",
+                },
+            )
+            data = resp.json()
+            wbi_img = data["data"]["wbi_img"]
+            img_key = wbi_img["img_url"].rsplit("/", 1)[-1].split(".")[0]
+            sub_key = wbi_img["sub_url"].rsplit("/", 1)[-1].split(".")[0]
+            return img_key, sub_key
+        except (requests.RequestException, KeyError, json.JSONDecodeError) as e:
+            if attempt < 2:
+                print(f"  [重试] get_wbi_keys 失败 (尝试 {attempt + 1}/3): {e}")
+                time.sleep(2 ** attempt)
+    raise RuntimeError("获取 WBI 密钥失败，已重试 3 次")
 
 
 def fetch_dynamics(session: requests.Session, uid: str, img_key: str, sub_key: str) -> list:
-    """获取指定用户的动态列表，返回最新动态条目列表"""
-    params = sign_params(
-        {"host_mid": uid, "timezone_offset": "-480"},
-        img_key,
-        sub_key,
-    )
-    resp = session.get(
-        "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space",
-        params=params,
-        timeout=15,
-    )
-    data = resp.json()
-    if data.get("code") != 0:
-        raise RuntimeError(f"API错误: code={data.get('code')}, msg={data.get('message')}")
-    return data["data"].get("items", [])
+    """获取指定用户的动态列表（带重试）"""
+    for attempt in range(3):
+        try:
+            params = sign_params(
+                {"host_mid": uid, "timezone_offset": "-480"},
+                img_key,
+                sub_key,
+            )
+            resp = session.get(
+                "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space",
+                params=params,
+                timeout=15,
+                headers={
+                    "Accept": "application/json, text/plain, */*",
+                    "Referer": f"https://space.bilibili.com/{uid}/dynamic",
+                    "Origin": "https://space.bilibili.com",
+                },
+            )
+            data = resp.json()
+            if data.get("code") == -412:
+                # 风控拦截，等一会儿重试
+                if attempt < 2:
+                    wait = 3 * (attempt + 1)
+                    print(f"  [风控] 412 被拦截，{wait}秒后重试 ({attempt + 1}/3)...")
+                    time.sleep(wait)
+                    continue
+                raise RuntimeError("B站风控拦截 (412)，已重试 3 次")
+            if data.get("code") != 0:
+                raise RuntimeError(f"API错误: code={data.get('code')}, msg={data.get('message')}")
+            return data["data"].get("items", [])
+        except (requests.RequestException, KeyError) as e:
+            if attempt < 2:
+                print(f"  [重试] fetch_dynamics 失败 (尝试 {attempt + 1}/3): {e}")
+                time.sleep(2 ** attempt)
+    raise RuntimeError("获取动态列表失败，已重试 3 次")
 
 
 # ============================================================

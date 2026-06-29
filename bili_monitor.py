@@ -104,7 +104,7 @@ def create_session() -> requests.Session:
             "q=0.9,image/avif,image/webp,*/*;q=0.8"
         ),
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate",
         "Cache-Control": "no-cache",
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",

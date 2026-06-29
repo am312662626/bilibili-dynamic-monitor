@@ -1,0 +1,16 @@
+# 忽略本目录下所有和 B站监控项目无关的文件
+*.xlsx
+*.txt
+*.csv
+*.js
+*.html
+*.png
+nul
+
+# 保留监控项目文件（白名单）
+!bili_monitor.py
+!state.json
+!requirements.txt
+!README.md
+!.gitignore
+!.github/

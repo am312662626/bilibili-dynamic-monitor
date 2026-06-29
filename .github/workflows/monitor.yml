@@ -1,0 +1,41 @@
+name: B站动态监控
+
+on:
+  schedule:
+    # 每 5 分钟运行一次 (GitHub Actions 最小间隔)
+    - cron: "*/5 * * * *"
+  # 允许手动触发
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 运行监控脚本
+        env:
+          SERVER_CHAN_SENDKEY: ${{ secrets.SERVER_CHAN_SENDKEY }}
+          BILI_UID: "11473291"
+        run: python bili_monitor.py
+
+      - name: 提交状态文件
+        # 仅当 state.json 有变化时提交
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git diff --staged --quiet || (
+            git commit -m "chore: 更新动态监控状态 [skip ci]"
+            git push
+          )

@@ -112,19 +112,19 @@ def create_session() -> requests.Session:
         "Sec-Fetch-User": "?1",
         "Upgrade-Insecure-Requests": "1",
     })
-    # 先访问 UP 主空间页获取 Cookie（比主站更不容易触发风控）
-    for attempt in range(3):
-        try:
-            resp = session.get(
-                f"https://space.bilibili.com/{BILI_UID}/dynamic",
-                timeout=15,
-                allow_redirects=True,
-            )
-            if resp.status_code == 200:
-                break
-        except requests.RequestException:
-            if attempt < 2:
-                time.sleep(2 ** attempt)
+    # 依次访问主站和 UP 空间页获取完整 Cookie
+    for url in [
+        "https://www.bilibili.com/",
+        f"https://space.bilibili.com/{BILI_UID}/dynamic",
+    ]:
+        for attempt in range(3):
+            try:
+                resp = session.get(url, timeout=15, allow_redirects=True)
+                if resp.status_code == 200:
+                    break
+            except requests.RequestException:
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
     return session
 
 
@@ -137,10 +137,19 @@ def get_wbi_keys(session: requests.Session) -> tuple:
                 timeout=10,
                 headers={
                     "Accept": "application/json, text/plain, */*",
-                    "Referer": "https://www.bilibili.com/",
-                    "Origin": "https://www.bilibili.com",
+                    "Referer": f"https://space.bilibili.com/{BILI_UID}/dynamic",
+                    "Origin": "https://space.bilibili.com",
                 },
             )
+            # 检查是否被风控（返回 HTML 而非 JSON）
+            ct = resp.headers.get("Content-Type", "")
+            if "text/html" in ct:
+                if attempt < 2:
+                    wait = 3 * (attempt + 1)
+                    print(f"  [风控] nav 接口返回 HTML，{wait}秒后重试 ({attempt + 1}/3)...")
+                    time.sleep(wait)
+                    continue
+                raise RuntimeError("nav API 被风控拦截，返回 HTML 页面")
             data = resp.json()
             wbi_img = data["data"]["wbi_img"]
             img_key = wbi_img["img_url"].rsplit("/", 1)[-1].split(".")[0]

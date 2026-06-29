@@ -136,11 +136,15 @@ def get_wbi_keys(session: requests.Session) -> tuple:
                 "https://api.bilibili.com/x/web-interface/nav",
                 timeout=10,
                 headers={
+                    "User-Agent": session.headers.get("User-Agent", ""),
                     "Accept": "application/json, text/plain, */*",
                     "Referer": f"https://space.bilibili.com/{BILI_UID}/dynamic",
                     "Origin": "https://space.bilibili.com",
                 },
             )
+            print(f"  [调试] nav API status={resp.status_code}, "
+                  f"content-type={resp.headers.get('Content-Type','?')[:50]}, "
+                  f"body_len={len(resp.text)}, body[:200]={resp.text[:200]}")
             # 检查是否被风控（返回 HTML 而非 JSON）
             ct = resp.headers.get("Content-Type", "")
             if "text/html" in ct:
@@ -150,6 +154,13 @@ def get_wbi_keys(session: requests.Session) -> tuple:
                     time.sleep(wait)
                     continue
                 raise RuntimeError("nav API 被风控拦截，返回 HTML 页面")
+            if not resp.text.strip():
+                if attempt < 2:
+                    wait = 3 * (attempt + 1)
+                    print(f"  [风控] nav 接口返回空内容，{wait}秒后重试 ({attempt + 1}/3)...")
+                    time.sleep(wait)
+                    continue
+                raise RuntimeError("nav API 返回空内容")
             data = resp.json()
             wbi_img = data["data"]["wbi_img"]
             img_key = wbi_img["img_url"].rsplit("/", 1)[-1].split(".")[0]
@@ -352,6 +363,7 @@ def main():
 
     # 2. 创建会话并获取动态
     session = create_session()
+    print(f"[调试] Session cookies: {dict(session.cookies)}")
     try:
         img_key, sub_key = get_wbi_keys(session)
         items = fetch_dynamics(session, BILI_UID, img_key, sub_key)

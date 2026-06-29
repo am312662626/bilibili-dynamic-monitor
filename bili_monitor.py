@@ -125,6 +125,11 @@ def create_session() -> requests.Session:
             except requests.RequestException:
                 if attempt < 2:
                     time.sleep(2 ** attempt)
+    # 额外访问一次主站，确保 cookie 完整
+    try:
+        session.get("https://www.bilibili.com/", timeout=10)
+    except requests.RequestException:
+        pass
     return session
 
 
@@ -175,6 +180,8 @@ def get_wbi_keys(session: requests.Session) -> tuple:
 
 def fetch_dynamics(session: requests.Session, uid: str, img_key: str, sub_key: str) -> list:
     """获取指定用户的动态列表（带重试）"""
+    # 小延迟，避免触发频率限制
+    time.sleep(1)
     for attempt in range(3):
         try:
             params = sign_params(
@@ -187,9 +194,14 @@ def fetch_dynamics(session: requests.Session, uid: str, img_key: str, sub_key: s
                 params=params,
                 timeout=15,
                 headers={
+                    "User-Agent": session.headers.get("User-Agent", ""),
                     "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                    "Accept-Encoding": "gzip, deflate",
                     "Referer": f"https://space.bilibili.com/{uid}/dynamic",
                     "Origin": "https://space.bilibili.com",
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
                 },
             )
             data = resp.json()

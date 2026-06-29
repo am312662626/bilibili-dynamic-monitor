@@ -1,6 +1,8 @@
 name: B站动态监控
 
 on:
+  push:
+    branches: [master]
   schedule:
     # 每 5 分钟运行一次 (GitHub Actions 最小间隔)
     - cron: "*/5 * * * *"
